@@ -228,13 +228,13 @@ def main():
     port = int(os.environ.get('PORT', 8443))
     
     # Запускаем webhook (ПРАВИЛЬНЫЙ ВАРИАНТ)
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=TOKEN,                    # Токен в пути
-        webhook_url=f"https://good-company-bot.herokuapp.com/",  # Без токена в URL
-        drop_pending_updates=True
-    )
+application.run_webhook(
+    listen="0.0.0.0",
+    port=port,
+    url_path="webhook",                    # Простой путь
+    webhook_url=f"https://good-company-bot.herokuapp.com/webhook",
+    drop_pending_updates=True
+)
 
 if __name__ == '__main__':
     main()
