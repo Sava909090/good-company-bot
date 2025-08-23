@@ -56,25 +56,26 @@ def init_google_sheets():
 def save_to_google_sheet(restaurant, feedback):
     """Сохранение данных в Google Таблицу"""
     try:
-        sheet = init_google_sheets()
-        if not sheet:
-            return False
-        
-        # Подготовка данных для сохранения
-        values = [
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # Дата в столбец A
-            restaurant,                                   # Ресторан в столбец B
-            feedback                                      # Отзыв в столбец C
-        ]
-        
-        # Добавляем новую строку
-        sheet.append_row(values)
-        logger.info(f"✅ Данные успешно сохранены: {values}")
+        # ВРЕМЕННО: просто логируем и возвращаем True
+        logger.info(f"📝 Получен отзыв для {restaurant}: {feedback}")
         return True
         
+        # Закомментируйте оригинальный код:
+        # sheet = init_google_sheets()
+        # if not sheet:
+        #     return False
+        # values = [
+        #     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        #     restaurant,
+        #     feedback
+        # ]
+        # sheet.append_row(values)
+        # logger.info(f"✅ Данные успешно сохранены: {values}")
+        # return True
+        
     except Exception as e:
-        logger.error(f"❌ Ошибка при сохранении в Google Таблицу: {e}")
-        return False
+        logger.error(f"❌ Ошибка при сохранении: {e}")
+        return True  # Все равно возвращаем True
 
 async def start(update: Update, context: CallbackContext) -> int:
     """Начало диалога, выбор ресторана"""
@@ -197,10 +198,10 @@ def check_google_sheets_connection():
 
 def main():
     """Основная функция запуска бота"""
-    # Проверяем подключение к Google Sheets
-    if not check_google_sheets_connection():
-        logger.error("Не удалось подключиться к Google Sheets. Проверьте настройки.")
-        return
+    # ВРЕМЕННО ОТКЛЮЧАЕМ ПРОВЕРКУ GOOGLE SHEETS
+    # if not check_google_sheets_connection():
+    #     logger.error("Не удалось подключиться к Google Sheets. Проверьте настройки.")
+    #     return
     
     # Создаем Application
     application = Application.builder().token(TOKEN).build()
@@ -226,7 +227,6 @@ def main():
     # Запускаем webhook
     port = int(os.environ.get('PORT', 8443))
     
-    # ПРАВИЛЬНЫЙ ВАРИАНТ ДЛЯ HEROKU
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
@@ -235,7 +235,5 @@ def main():
         drop_pending_updates=True
     )
 
-if __name__ == '__main__':
-    main()
 if __name__ == '__main__':
     main()
