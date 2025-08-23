@@ -217,24 +217,25 @@ def main():
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
-        per_message=False
     )
     
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("cancel", cancel))
     
-    # ЗАПУСК ДЛЯ HEROKU
+    # Запускаем webhook
     port = int(os.environ.get('PORT', 8443))
     
-    # Запускаем webhook (ПРАВИЛЬНЫЙ ВАРИАНТ)
-application.run_webhook(
-    listen="0.0.0.0",
-    port=port,
-    url_path="webhook",                    # Простой путь
-    webhook_url=f"https://good-company-bot.herokuapp.com/webhook",
-    drop_pending_updates=True
-)
+    # ПРАВИЛЬНЫЙ ВАРИАНТ ДЛЯ HEROKU
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=TOKEN,
+        webhook_url=f"https://good-company-bot.herokuapp.com/",
+        drop_pending_updates=True
+    )
 
+if __name__ == '__main__':
+    main()
 if __name__ == '__main__':
     main()
