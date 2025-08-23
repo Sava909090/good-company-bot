@@ -8,10 +8,8 @@ from telegram.ext import (
 )
 from datetime import datetime
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-import tempfile
-import uuid
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import CallbackQueryHandler
 
 # Настройка логирования
 logging.basicConfig(
@@ -26,14 +24,8 @@ TOKEN = '8474316673:AAFmmmUzeSTWs1FW3CzM-zRK3F808Ej_scM'
 # ID Google Таблицы
 SPREADSHEET_ID = '1Trc6yLj6yKXmuPsoUrbgDgucinIMxAVbot6LgsLxHG8'
 
-# ID папки на Google Drive для загрузки фото
-DRIVE_FOLDER_ID = '1liDwH_wYCuDQIgvZq54C5hyCHmR9yIlo'  # Замените на реальный ID папки
-
 # Настройки для Google Sheets
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive.file'
-]
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE_ACCOUNT_FILE = 'credentials.json'
 
 # Состояния разговора
@@ -49,60 +41,22 @@ RESTAURANTS = [
     "Ресторан 6"
 ]
 
-def init_google_services():
-    """Инициализация Google Sheets и Drive"""
+def init_google_sheets():
+    """Инициализация Google Sheets"""
     try:
         creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-        
-        # Инициализация Google Sheets
         gc = gspread.authorize(creds)
         sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
-        
-        # Инициализация Google Drive
-        drive_service = build('drive', 'v3', credentials=creds)
-        
-        logger.info("✅ Google сервисы инициализированы успешно")
-        return sheet, drive_service
-        
+        logger.info("✅ Google Sheets инициализирован успешно")
+        return sheet
     except Exception as e:
-        logger.error(f"❌ Ошибка инициализации Google сервисов: {e}")
-        return None, None
-
-def upload_photo_to_drive(drive_service, photo_file, restaurant_name):
-    """Загрузка фото на Google Drive"""
-    try:
-        # Создаем уникальное имя файла
-        filename = f"{restaurant_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.jpg"
-        
-        file_metadata = {
-            'name': filename,
-            'parents': [DRIVE_FOLDER_ID]
-        }
-        
-        media = MediaFileUpload(photo_file, mimetype='image/jpeg')
-        file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, webViewLink'
-        ).execute()
-        
-        # Делаем файл публично доступным
-        drive_service.permissions().create(
-            fileId=file['id'],
-            body={'type': 'anyone', 'role': 'reader'}
-        ).execute()
-        
-        logger.info(f"✅ Фото успешно загружено: {file['webViewLink']}")
-        return file['webViewLink']
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка при загрузке фото на Drive: {e}")
+        logger.error(f"❌ Ошибка инициализации Google Sheets: {e}")
         return None
 
-def save_to_google_sheet(restaurant, feedback, photo_url=None):
+def save_to_google_sheet(restaurant, feedback):
     """Сохранение данных в Google Таблицу"""
     try:
-        sheet, drive_service = init_google_services()
+        sheet = init_google_sheets()
         if not sheet:
             return False
         
@@ -110,8 +64,7 @@ def save_to_google_sheet(restaurant, feedback, photo_url=None):
         values = [
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # Дата в столбец A
             restaurant,                                   # Ресторан в столбец B
-            feedback,                                     # Отзыв в столбец C
-            photo_url if photo_url else "Нет фото"        # Ссылка на фото в столбец D
+            feedback                                      # Отзыв в столбец C
         ]
         
         # Добавляем новую строку
@@ -160,15 +113,14 @@ async def restaurant_choice(update: Update, context: CallbackContext) -> int:
     
     await update.message.reply_text(
         f"🏪 Вы выбрали: {restaurant}\n\n"
-        "Теперь напишите ваш отзыв или предложение.\n"
-        "Вы также можете отправить фото (с подписью или без):",
+        "Теперь напишите ваш отзыв или предложение:",
         reply_markup=ReplyKeyboardRemove()
     )
     
     return FEEDBACK
 
 async def feedback_received(update: Update, context: CallbackContext) -> int:
-    """Обработка полученного текстового отзыва"""
+    """Обработка полученного отзыва"""
     feedback = update.message.text
     restaurant = context.user_data.get('restaurant', 'Не указан')
     
@@ -179,66 +131,6 @@ async def feedback_received(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text(
             "✅ Спасибо за ваш отзыв! Он был успешно сохранен.\n\n"
             "Команда уже начала работу над ним!\n\n"
-            "Чтобы оставить еще один отзыв, нажмите /start"
-        )
-    else:
-        await update.message.reply_text(
-            "❌ Произошла ошибка при сохранении отзыв. "
-            "Пожалуйста, попробуйте позже или свяжитесь с администратором.\n\n"
-            "Чтобы попробовать еще раз, нажмите /start"
-        )
-    
-    # Очищаем данные пользователя
-    context.user_data.clear()
-    
-    return ConversationHandler.END
-
-async def handle_photo(update: Update, context: CallbackContext) -> int:
-    """Обработка полученного фото"""
-    restaurant = context.user_data.get('restaurant', 'Не указан')
-    photo_url = None
-    
-    try:
-        # Получаем фото (самое высокое качество)
-        photo_file = await update.message.photo[-1].get_file()
-        
-        # Создаем временный файл
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
-            await photo_file.download_to_drive(temp_file.name)
-            temp_file_path = temp_file.name
-            
-        # Инициализируем Google сервисы
-        sheet, drive_service = init_google_services()
-        if not drive_service:
-            raise Exception("Не удалось инициализировать Google Drive")
-        
-        # Загружаем фото на Drive
-        photo_url = upload_photo_to_drive(drive_service, temp_file_path, restaurant)
-        
-        # Удаляем временный файл
-        os.unlink(temp_file_path)
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка при обработке фото: {e}")
-        await update.message.reply_text(
-            "❌ Произошла ошибка при обработке фото. "
-            "Текстовый отзыв будет сохранен без фото."
-        )
-    
-    # Получаем текст отзыва (если есть подпись к фото)
-    feedback = update.message.caption if update.message.caption else "Фото без подписи"
-    
-    # Сохраняем в Google Таблицу
-    success = save_to_google_sheet(restaurant, feedback, photo_url)
-    
-    if success:
-        if photo_url:
-            message = f"✅ Спасибо за ваш отзыв с фото! Данные успешно сохранены.\n\nФото: {photo_url}"
-        else:
-            message = "✅ Спасибо за ваш отзыв! Он был успешно сохранен."
-        
-        await update.message.reply_text(
-            message + "\n\nКоманда уже начала работу над ним!\n\n"
             "Чтобы оставить еще один отзыв, нажмите /start"
         )
     else:
@@ -270,33 +162,33 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         "Команды:\n"
         "/start - начать процесс оставления отзыва\n"
         "/help - показать эту справку\n\n"
-        "Вы можете отправлять текстовые отзывы или фото с подписями!\n"
-        "Фото автоматически сохраняются в Google Drive."
+        "Просто нажмите /start и следуйте инструкциям!"
     )
 
-def check_google_services_connection():
-    """Проверка подключения к Google сервисам"""
+def check_google_sheets_connection():
+    """Проверка подключения к Google Sheets"""
     logger.info("=" * 50)
     logger.info("Запуск бота с проверкой подключения...")
     logger.info("=" * 50)
     
-    logger.info("Инициализация Google сервисов...")
+    logger.info("Инициализация Google Sheets...")
     try:
-        sheet, drive_service = init_google_services()
-        if sheet and drive_service:
+        sheet = init_google_sheets()
+        if sheet:
             # Получаем текущие данные для проверки
             data = sheet.get_all_values()
             logger.info(f"Текущие данные в таблице: {len(data)} строк")
+            logger.info(f"Первые строки таблицы: {data[:3]}")
             
             # Проверяем заголовки
             if len(data) > 0:
                 headers = data[0]
                 logger.info(f"Заголовки таблицы: {headers}")
             
-            logger.info("✅ Google сервисы инициализированы успешно")
+            logger.info("✅ Google Sheets инициализирован успешно")
             return True
         else:
-            logger.error("❌ Не удалось инициализировать Google сервисы")
+            logger.error("❌ Не удалось инициализировать Google Sheets")
             return False
             
     except Exception as e:
@@ -305,9 +197,9 @@ def check_google_services_connection():
 
 def main():
     """Основная функция запуска бота"""
-    # Проверяем подключение к Google сервисам
-    if not check_google_services_connection():
-        logger.error("Не удалось подключиться к Google сервисам. Проверьте настройки.")
+    # Проверяем подключение к Google Sheets
+    if not check_google_sheets_connection():
+        logger.error("Не удалось подключиться к Google Sheets. Проверьте настройки.")
         return
     
     # Создаем Application
@@ -321,8 +213,7 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, restaurant_choice)
             ],
             FEEDBACK: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, feedback_received),
-                MessageHandler(filters.PHOTO, handle_photo)  # Добавлен обработчик фото
+                MessageHandler(filters.TEXT & ~filters.COMMAND, feedback_received)
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
@@ -333,9 +224,17 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("cancel", cancel))
     
-    # Запускаем бота
-    logger.info("Бот запущен...")
-    application.run_polling()
+    # ЗАПУСК ДЛЯ HEROKU
+    port = int(os.environ.get('PORT', 8443))
+    
+    # Запускаем webhook (ПРАВИЛЬНЫЙ ВАРИАНТ)
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=TOKEN,                    # Токен в пути
+        webhook_url=f"https://good-company-bot.herokuapp.com/",  # Без токена в URL
+        drop_pending_updates=True
+    )
 
 if __name__ == '__main__':
     main()
