@@ -1,239 +1,118 @@
-import os
 import logging
-import gspread
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters,
-    ConversationHandler, CallbackContext
-)
+import os
 from datetime import datetime
+
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.utils import executor
+
+import gspread
 from google.oauth2.service_account import Credentials
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import CallbackQueryHandler
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# -------------------- CONFIG --------------------
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # токен бота
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")  # ID Google-таблицы
+DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")  # ID папки на Google Drive
 
-# Токен бота
-TOKEN = '8474316673:AAFmmmUzeSTWs1FW3CzM-zRK3F808Ej_scM'
+# сервисный аккаунт
+creds = Credentials.from_service_account_file("credentials.json", scopes=[
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+])
 
-# ID Google Таблицы
-SPREADSHEET_ID = '1Trc6yLj6yKXmuPsoUrbgDgucinIMxAVbot6LgsLxHG8'
+gc = gspread.authorize(creds)
+sh = gc.open_by_key(SPREADSHEET_ID)
+worksheet = sh.sheet1
 
-# Настройки для Google Sheets
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-SERVICE_ACCOUNT_FILE = 'credentials.json'
+drive_service = build("drive", "v3", credentials=creds)
 
-# Состояния разговора
-RESTAURANT, FEEDBACK = range(2)
+# -------------------- TELEGRAM --------------------
+logging.basicConfig(level=logging.INFO)
 
-# Список ресторанов (6 штук)
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
+
+# список ресторанов
 RESTAURANTS = [
-    "Barbaresco",
-    "Brut is good", 
-    "Good Company",
-    "United",
-    "Буфет на Большой",
-    "Ресторан 6"
+    "Ресторан 1",
+    "Ресторан 2",
+    "Ресторан 3",
+    "Ресторан 4",
+    "Ресторан 5",
+    "Ресторан 6",
 ]
 
-def init_google_sheets():
-    """Инициализация Google Sheets"""
-    try:
-        creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-        gc = gspread.authorize(creds)
-        sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
-        logger.info("✅ Google Sheets инициализирован успешно")
-        return sheet
-    except Exception as e:
-        logger.error(f"❌ Ошибка инициализации Google Sheets: {e}")
-        return None
+# словарь для хранения выбранного ресторана
+user_restaurant = {}
 
-def save_to_google_sheet(restaurant, feedback):
-    """Сохранение данных в Google Таблицу"""
-    try:
-        # ВРЕМЕННО: просто логируем и возвращаем True
-        logger.info(f"📝 Получен отзыв для {restaurant}: {feedback}")
-        return True
-        
-        # Закомментируйте оригинальный код:
-        # sheet = init_google_sheets()
-        # if not sheet:
-        #     return False
-        # values = [
-        #     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        #     restaurant,
-        #     feedback
-        # ]
-        # sheet.append_row(values)
-        # logger.info(f"✅ Данные успешно сохранены: {values}")
-        # return True
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка при сохранении: {e}")
-        return True  # Все равно возвращаем True
 
-async def start(update: Update, context: CallbackContext) -> int:
-    """Начало диалога, выбор ресторана"""
-    keyboard = [
-        [RESTAURANTS[0], RESTAURANTS[1], RESTAURANTS[2]],
-        [RESTAURANTS[3], RESTAURANTS[4], RESTAURANTS[5]]
-    ]
-    
-    reply_markup = ReplyKeyboardMarkup(
-        keyboard, 
-        resize_keyboard=True, 
-        one_time_keyboard=True
-    )
-    
-    await update.message.reply_text(
-        "🍽️ Добро пожаловать в систему отзывов!\n\n"
-        "Пожалуйста, выберите ресторан из списка:",
-        reply_markup=reply_markup
-    )
-    
-    return RESTAURANT
+# --- меню старта ---
+@dp.message_handler(commands=['start'])
+async def start_cmd(message: types.Message):
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    for r in RESTAURANTS:
+        kb.add(KeyboardButton(r))
+    await message.answer("Выберите ресторан:", reply_markup=kb)
 
-async def restaurant_choice(update: Update, context: CallbackContext) -> int:
-    """Обработка выбора ресторана"""
-    restaurant = update.message.text
-    
-    # Проверяем, что выбранный ресторан есть в списке
-    if restaurant not in RESTAURANTS:
-        await update.message.reply_text(
-            "❌ Пожалуйста, выберите ресторан из предложенного списка.\n\n"
-            "Нажмите /start чтобы выбрать снова."
-        )
-        return ConversationHandler.END
-    
-    context.user_data['restaurant'] = restaurant
-    
-    await update.message.reply_text(
-        f"🏪 Вы выбрали: {restaurant}\n\n"
-        "Теперь напишите ваш отзыв или предложение:",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    
-    return FEEDBACK
 
-async def feedback_received(update: Update, context: CallbackContext) -> int:
-    """Обработка полученного отзыва"""
-    feedback = update.message.text
-    restaurant = context.user_data.get('restaurant', 'Не указан')
-    
-    # Сохраняем в Google Таблицу
-    success = save_to_google_sheet(restaurant, feedback)
-    
-    if success:
-        await update.message.reply_text(
-            "✅ Спасибо за ваш отзыв! Он был успешно сохранен.\n\n"
-            "Команда уже начала работу над ним!\n\n"
-            "Чтобы оставить еще один отзыв, нажмите /start"
-        )
-    else:
-        await update.message.reply_text(
-            "❌ Произошла ошибка при сохранении отзыва. "
-            "Пожалуйста, попробуйте позже или свяжитесь с администратором.\n\n"
-            "Чтобы попробовать еще раз, нажмите /start"
-        )
-    
-    # Очищаем данные пользователя
-    context.user_data.clear()
-    
-    return ConversationHandler.END
+# --- выбор ресторана ---
+@dp.message_handler(lambda msg: msg.text in RESTAURANTS)
+async def choose_restaurant(message: types.Message):
+    user_restaurant[message.from_user.id] = message.text
+    await message.answer(f"Вы выбрали {message.text}. Напишите отзыв и при необходимости прикрепите фото.")
 
-async def cancel(update: Update, context: CallbackContext) -> int:
-    """Отмена диалога"""
-    await update.message.reply_text(
-        'Диалог отменен. Чтобы начать заново, нажмите /start',
-        reply_markup=ReplyKeyboardRemove()
-    )
-    
-    context.user_data.clear()
-    return ConversationHandler.END
 
-async def help_command(update: Update, context: CallbackContext) -> None:
-    """Команда помощи"""
-    await update.message.reply_text(
-        "🤖 Бот для сбора отзывов о ресторанах\n\n"
-        "Команды:\n"
-        "/start - начать процесс оставления отзыва\n"
-        "/help - показать эту справку\n\n"
-        "Просто нажмите /start и следуйте инструкциям!"
+# --- обработка отзывов ---
+@dp.message_handler(content_types=['text', 'photo'])
+async def handle_review(message: types.Message):
+    user_id = message.from_user.id
+
+    if user_id not in user_restaurant:
+        await message.answer("Сначала выберите ресторан через /start")
+        return
+
+    restaurant = user_restaurant[user_id]
+    text_review = message.text if message.text else ""
+
+    # дата
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # если есть фото
+    photo_url = ""
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        file = await bot.get_file(file_id)
+        file_path = file.file_path
+
+        # скачать фото
+        photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+        downloaded = await bot.download_file(file_path)
+        with open(photo_name, "wb") as f:
+            f.write(downloaded.read())
+
+        # загрузить в Google Drive
+        file_metadata = {"name": photo_name, "parents": [DRIVE_FOLDER_ID]}
+        media = MediaFileUpload(photo_name, mimetype="image/jpeg")
+        uploaded = drive_service.files().create(
+            body=file_metadata, media_body=media, fields="id"
+        ).execute()
+
+        file_id_drive = uploaded.get("id")
+        photo_url = f"https://drive.google.com/file/d/{file_id_drive}/view?usp=sharing"
+
+        os.remove(photo_name)  # удаляем локальный файл
+
+    # пишем в таблицу
+    worksheet.append_row([date_str, restaurant, text_review, photo_url])
+
+    # ответ пользователю
+    await message.answer(
+        "Спасибо за ваш акцент! Команда уже начала работу над улучшением!\n"
+        "Чтобы оставить ещё один отзыв, нажмите /start"
     )
 
-def check_google_sheets_connection():
-    """Проверка подключения к Google Sheets"""
-    logger.info("=" * 50)
-    logger.info("Запуск бота с проверкой подключения...")
-    logger.info("=" * 50)
-    
-    logger.info("Инициализация Google Sheets...")
-    try:
-        sheet = init_google_sheets()
-        if sheet:
-            # Получаем текущие данные для проверки
-            data = sheet.get_all_values()
-            logger.info(f"Текущие данные в таблице: {len(data)} строк")
-            logger.info(f"Первые строки таблицы: {data[:3]}")
-            
-            # Проверяем заголовки
-            if len(data) > 0:
-                headers = data[0]
-                logger.info(f"Заголовки таблицы: {headers}")
-            
-            logger.info("✅ Google Sheets инициализирован успешно")
-            return True
-        else:
-            logger.error("❌ Не удалось инициализировать Google Sheets")
-            return False
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка при проверке подключения: {e}")
-        return False
 
-def main():
-    """Основная функция запуска бота"""
-    # ВРЕМЕННО ОТКЛЮЧАЕМ ПРОВЕРКУ GOOGLE SHEETS
-    # if not check_google_sheets_connection():
-    #     logger.error("Не удалось подключиться к Google Sheets. Проверьте настройки.")
-    #     return
-    
-    # Создаем Application
-    application = Application.builder().token(TOKEN).build()
-    
-    # Добавляем обработчики
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            RESTAURANT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, restaurant_choice)
-            ],
-            FEEDBACK: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, feedback_received)
-            ],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)],
-    )
-    
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("cancel", cancel))
-    
-    # Запускаем webhook
-    port = int(os.environ.get('PORT', 8443))
-    
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=TOKEN,
-        webhook_url=f"https://good-company-bot.herokuapp.com/",
-        drop_pending_updates=True
-    )
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    executor.start_polling(dp, skip_updates=True)
