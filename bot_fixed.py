@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
@@ -12,12 +13,17 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 # -------------------- CONFIG --------------------
-BOT_TOKEN = os.getenv("8474316673:AAFmmmUzeSTWs1FW3CzM-zRK3F808Ej_scM")  # токен бота
-SPREADSHEET_ID = os.getenv("1Trc6yLj6yKXmuPsoUrbgDgucinIMxAVbot6LgsLxHG8")  # ID Google-таблицы
-DRIVE_FOLDER_ID = os.getenv("1liDwH_wYCuDQIgvZq54C5hyCHmR9yIlo")  # ID папки на Google Drive
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # токен бота
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")  # ID Google-таблицы
+DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")  # ID папки на Google Drive
 
-# сервисный аккаунт
-creds = Credentials.from_service_account_file("credentials.json", scopes=[
+# читаем GOOGLE_CREDENTIALS из переменных окружения
+credentials_json = os.getenv("GOOGLE_CREDENTIALS")
+if not credentials_json:
+    raise ValueError("Переменная окружения GOOGLE_CREDENTIALS не найдена")
+
+info = json.loads(credentials_json)
+creds = Credentials.from_service_account_info(info, scopes=[
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ])
