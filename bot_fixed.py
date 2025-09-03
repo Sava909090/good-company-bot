@@ -17,6 +17,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 
+# GOOGLE_CREDENTIALS — JSON сервисного аккаунта
 credentials_json = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_json:
     raise ValueError("Переменная окружения GOOGLE_CREDENTIALS не найдена")
@@ -27,12 +28,11 @@ creds = Credentials.from_service_account_info(info, scopes=[
     "https://www.googleapis.com/auth/drive"
 ])
 
-# Google Sheets
+# -------------------- GOOGLE SERVICES --------------------
 gc = gspread.authorize(creds)
 sh = gc.open_by_key(SPREADSHEET_ID)
 worksheet = sh.sheet1
 
-# Google Drive
 drive_service = build("drive", "v3", credentials=creds)
 
 # -------------------- TELEGRAM --------------------
@@ -43,6 +43,7 @@ dp = Dispatcher(bot)
 # список ресторанов
 RESTAURANTS = ["Ресторан 1", "Ресторан 2", "Ресторан 3", "Ресторан 4", "Ресторан 5", "Ресторан 6"]
 
+# выбранный ресторан по пользователю
 user_restaurant = {}
 
 # --- меню старта ---
@@ -79,13 +80,13 @@ async def handle_review(message: types.Message):
             file = await bot.get_file(file_id)
             file_path = file.file_path
 
-            # скачиваем файл
+            # скачиваем фото
             photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
             downloaded = await bot.download_file(file_path)
             with open(photo_name, "wb") as f:
                 f.write(downloaded.read())
 
-            # загружаем на Google Drive
+            # загружаем в папку на Google Drive
             file_metadata = {
                 "name": photo_name,
                 "parents": [DRIVE_FOLDER_ID]
@@ -109,6 +110,7 @@ async def handle_review(message: types.Message):
     # --- запись в таблицу ---
     worksheet.append_row([date_str, restaurant, text_review, photo_url])
 
+    # --- ответ пользователю ---
     await message.answer(
         "Спасибо за ваш отзыв! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
