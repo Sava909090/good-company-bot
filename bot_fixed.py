@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
@@ -7,13 +8,23 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
 
 import gspread
+from google.oauth2.service_account import Credentials
 
 # -------------------- CONFIG --------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
 # -------------------- GOOGLE SHEETS --------------------
-gc = gspread.service_account(filename="service_account.json")  # либо через переменную окружения
+credentials_json = os.getenv("GOOGLE_CREDENTIALS")
+if not credentials_json:
+    raise ValueError("Переменная окружения GOOGLE_CREDENTIALS не найдена")
+
+info = json.loads(credentials_json)
+creds = Credentials.from_service_account_info(info, scopes=[
+    "https://www.googleapis.com/auth/spreadsheets"
+])
+
+gc = gspread.authorize(creds)
 sh = gc.open_by_key(SPREADSHEET_ID)
 worksheet = sh.sheet1
 
@@ -23,8 +34,9 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # список ресторанов
-RESTAURANTS = ["Ресторан 1", "Ресторан 2", "Ресторан 3", "Ресторан 4", "Ресторан 5", "Ресторан 6"]
+RESTAURANTS = ["Barbaesco", "Brut is good", "Буфет на большой", "Good company", "United", "Brut lee"]
 
+# выбранный ресторан по пользователю
 user_restaurant = {}
 
 # --- меню старта ---
@@ -50,26 +62,30 @@ async def handle_review(message: types.Message):
         return
 
     restaurant = user_restaurant[user_id]
-    # исправленная обработка текста при фото+текст
-    text_review = message.text or message.caption or ""
+    text_review = message.text if message.text else ""
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    photo_formula = ""
+    photo_file_id = ""
     photo_link = ""
 
+    # --- обработка фото ---
     if message.photo:
         try:
+            # Берём file_id последней (самой большой) фотографии
             file_id = message.photo[-1].file_id
-            # формула для вставки в таблицу (просмотр фото)
-            photo_formula = f'=IMAGE("https://api.telegram.org/file/bot{BOT_TOKEN}/{(await bot.get_file(file_id)).file_path}")'
-            # ссылка на скачивание
-            photo_link = f'https://api.telegram.org/file/bot{BOT_TOKEN}/{(await bot.get_file(file_id)).file_path}'
+            photo_file_id = file_id
+
+            # Получаем прямую ссылку через API Telegram
+            file_info = await bot.get_file(file_id)
+            photo_link = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
+
         except Exception as e:
             logging.error(f"Ошибка при обработке фото: {e}")
-            await message.answer("Не удалось загрузить фото, попробуйте снова.")
+            await message.answer("Не удалось обработать фото, попробуйте снова.")
 
-    # запись в таблицу
-    worksheet.append_row([date_str, restaurant, text_review, photo_formula, photo_link])
+    # --- запись в таблицу ---
+    worksheet.append_row([date_str, restaurant, text_review, photo_file_id, photo_link])
 
+    # --- ответ пользователю ---
     await message.answer(
         "Спасибо за ваш отзыв! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
