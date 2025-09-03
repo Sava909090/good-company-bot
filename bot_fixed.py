@@ -75,45 +75,45 @@ async def choose_restaurant(message: types.Message):
 async def handle_review(message: types.Message):
     user_id = message.from_user.id
 
-    if user_id not in user_restaurant:
+    restaurant = user_restaurant.get(user_id)
+    if not restaurant:
         await message.answer("Сначала выберите ресторан через /start")
         return
 
-    restaurant = user_restaurant[user_id]
     text_review = message.text if message.text else ""
-
-    # дата
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # если есть фото
     photo_url = ""
+
     if message.photo:
-        file_id = message.photo[-1].file_id
-        file = await bot.get_file(file_id)
-        file_path = file.file_path
+        try:
+            file_id = message.photo[-1].file_id
+            file = await bot.get_file(file_id)
+            file_path = file.file_path
 
-        # скачать фото
-        photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
-        downloaded = await bot.download_file(file_path)
-        with open(photo_name, "wb") as f:
-            f.write(downloaded.read())
+            photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+            downloaded = await bot.download_file(file_path)
+            with open(photo_name, "wb") as f:
+                f.write(downloaded.read())
 
-        # загрузить в Google Drive
-        file_metadata = {"name": photo_name, "parents": [DRIVE_FOLDER_ID]}
-        media = MediaFileUpload(photo_name, mimetype="image/jpeg")
-        uploaded = drive_service.files().create(
-            body=file_metadata, media_body=media, fields="id"
-        ).execute()
+            # загрузка на Google Drive
+            file_metadata = {"name": photo_name, "parents": [DRIVE_FOLDER_ID]}
+            media = MediaFileUpload(photo_name, mimetype="image/jpeg")
+            uploaded = drive_service.files().create(
+                body=file_metadata, media_body=media, fields="id"
+            ).execute()
 
-        file_id_drive = uploaded.get("id")
-        photo_url = f"https://drive.google.com/file/d/{file_id_drive}/view?usp=sharing"
+            file_id_drive = uploaded.get("id")
+            photo_url = f"https://drive.google.com/file/d/{file_id_drive}/view?usp=sharing"
 
-        os.remove(photo_name)  # удаляем локальный файл
+            os.remove(photo_name)
 
-    # пишем в таблицу
+        except Exception as e:
+            await message.answer(f"Ошибка при загрузке фото: {e}")
+
+    # добавляем строку в таблицу (даже если текст пустой)
     worksheet.append_row([date_str, restaurant, text_review, photo_url])
 
-    # ответ пользователю
+    # всегда отвечаем пользователю
     await message.answer(
         "Спасибо за ваш отзыв! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
