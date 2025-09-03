@@ -62,25 +62,31 @@ async def handle_review(message: types.Message):
         return
 
     restaurant = user_restaurant[user_id]
-    text_review = message.text if message.text else ""
+    text_review = message.caption if message.caption else (message.text if message.text else "")
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    photo_file_id = ""
-    photo_link = ""
+    image_formula = ""
+    download_link = ""
 
     # --- обработка фото ---
     if message.photo:
         try:
-            # Берём file_id последней фотографии
+            # Берём file_id самой большой (последней) фотографии
             file_id = message.photo[-1].file_id
-            photo_file_id = file_id
-            photo_link = f"https://t.me/c/{str(message.chat.id)[4:]}/{message.message_id}"
+            file_info = await bot.get_file(file_id)
+            file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
+
+            # В столбце D будет картинка через =IMAGE()
+            image_formula = f'=IMAGE("{file_url}")'
+
+            # В столбце E будет ссылка для скачивания
+            download_link = f'=HYPERLINK("{file_url}";"Скачать")'
 
         except Exception as e:
             logging.error(f"Ошибка при обработке фото: {e}")
             await message.answer("Не удалось обработать фото, попробуйте снова.")
 
     # --- запись в таблицу ---
-    worksheet.append_row([date_str, restaurant, text_review, photo_file_id, photo_link])
+    worksheet.append_row([date_str, restaurant, text_review, image_formula, download_link], value_input_option="USER_ENTERED")
 
     # --- ответ пользователю ---
     await message.answer(
