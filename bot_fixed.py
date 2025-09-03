@@ -69,22 +69,18 @@ async def handle_review(message: types.Message):
         return
 
     restaurant = user_restaurant[user_id]
-    # если фото с подписью → берём caption, иначе обычный текст
     text_review = message.caption if message.caption else (message.text if message.text else "")
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     image_formula = ""
     download_link = ""
 
-    # --- обработка фото ---
     if message.photo:
         try:
             file_id = message.photo[-1].file_id
             file_info = await bot.get_file(file_id)
             file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
 
-            # Картинка прямо в ячейке
             image_formula = f'=IMAGE("{file_url}")'
-            # Кнопка "Скачать"
             download_link = f'=HYPERLINK("{file_url}";"Скачать")'
 
         except Exception as e:
@@ -93,18 +89,20 @@ async def handle_review(message: types.Message):
 
     # --- запись в таблицу ---
     try:
-        next_row = len(worksheet.get_all_values()) + 1
+        # считаем только заполненные строки в колонке A
+        next_row = len(worksheet.col_values(1)) + 1
+
         worksheet.update(
             f"A{next_row}:E{next_row}",
             [[date_str, restaurant, text_review, image_formula, download_link]],
             value_input_option="USER_ENTERED"
         )
+
     except Exception as e:
         logging.error(f"Ошибка при записи в таблицу: {e}")
         await message.answer("Не удалось сохранить отзыв, попробуйте снова.")
         return
 
-    # --- ответ пользователю ---
     await message.answer(
         "Спасибо за ваш отзыв! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
