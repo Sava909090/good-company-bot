@@ -11,7 +11,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from googleapiclient.errors import HttpError
 
 # -------------------- CONFIG --------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -62,41 +61,46 @@ async def start_cmd(message: types.Message):
         kb.add(KeyboardButton(r))
     await message.answer("Выберите ресторан:", reply_markup=kb)
 
-
 # --- выбор ресторана ---
 @dp.message_handler(lambda msg: msg.text in RESTAURANTS)
 async def choose_restaurant(message: types.Message):
     user_restaurant[message.from_user.id] = message.text
-    await message.answer(f"Вы выбрали {message.text}. Напишите отзыв и/или прикрепите фото.")
-
+    await message.answer(
+        f"Вы выбрали {message.text}. Напишите отзыв и/или прикрепите фото."
+    )
 
 # --- обработка отзывов ---
 @dp.message_handler(content_types=['text', 'photo'])
 async def handle_review(message: types.Message):
     user_id = message.from_user.id
-    if user_id not in user_restaurant:
+    restaurant = user_restaurant.get(user_id, None)
+
+    if restaurant is None:
         await message.answer("Сначала выберите ресторан через /start")
         return
 
-    restaurant = user_restaurant[user_id]
     text_review = message.text if message.text else ""
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     photo_url = ""
 
     # если есть фото
     if message.photo:
-        try:
-            file_id = message.photo[-1].file_id
-            file = await bot.get_file(file_id)
-            file_path = file.file_path
+        file_id = message.photo[-1].file_id
+        file = await bot.get_file(file_id)
+        file_path = file.file_path
 
-            # скачать фото
-            photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+        photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+
+        # скачать фото локально
+        try:
             downloaded = await bot.download_file(file_path)
             with open(photo_name, "wb") as f:
                 f.write(downloaded.read())
+        except Exception as e:
+            logging.error(f"Ошибка при скачивании фото: {e}")
 
-            # загрузить в Google Drive
+        # загрузить на Google Drive
+        try:
             file_metadata = {"name": photo_name, "parents": [DRIVE_FOLDER_ID]}
             media = MediaFileUpload(photo_name, mimetype="image/jpeg")
             uploaded = drive_service.files().create(
@@ -104,17 +108,16 @@ async def handle_review(message: types.Message):
                 media_body=media,
                 fields="id"
             ).execute()
-
             file_id_drive = uploaded.get("id")
             photo_url = f"https://drive.google.com/file/d/{file_id_drive}/view?usp=sharing"
-
-            os.remove(photo_name)  # удаляем локальный файл
-
-        except HttpError as e:
+        except Exception as e:
             logging.error(f"Ошибка при загрузке фото: {e}")
-            await message.answer("Произошла ошибка при загрузке фото. Попробуйте ещё раз.")
+            photo_url = ""
+        finally:
+            if os.path.exists(photo_name):
+                os.remove(photo_name)
 
-    # если пользователь отправил только фото, text_review будет пустым
+    # добавляем запись в таблицу
     worksheet.append_row([date_str, restaurant, text_review, photo_url])
 
     # ответ пользователю
@@ -122,7 +125,6 @@ async def handle_review(message: types.Message):
         "Спасибо за ваш отзыв! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
     )
-
 
 # -------------------- MAIN --------------------
 if __name__ == "__main__":
