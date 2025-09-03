@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
@@ -13,12 +14,10 @@ from google.oauth2.service_account import Credentials
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
-# GOOGLE_CREDENTIALS — JSON сервисного аккаунта
 credentials_json = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_json:
     raise ValueError("Переменная окружения GOOGLE_CREDENTIALS не найдена")
 
-import json
 info = json.loads(credentials_json)
 creds = Credentials.from_service_account_info(info, scopes=[
     "https://www.googleapis.com/auth/spreadsheets"
@@ -37,7 +36,6 @@ dp = Dispatcher(bot)
 # список ресторанов
 RESTAURANTS = ["Ресторан 1", "Ресторан 2", "Ресторан 3", "Ресторан 4", "Ресторан 5", "Ресторан 6"]
 
-# выбранный ресторан по пользователю
 user_restaurant = {}
 
 # --- меню старта ---
@@ -65,26 +63,21 @@ async def handle_review(message: types.Message):
     restaurant = user_restaurant[user_id]
     text_review = message.text if message.text else ""
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    photo_cell = ""  # сюда будем писать формулу IMAGE
+    photo_formula = ""
+    photo_link = ""
 
     # --- обработка фото ---
     if message.photo:
-        try:
-            file_id = message.photo[-1].file_id
-            file = await bot.get_file(file_id)
-            file_path = file.file_path
-
-            # формируем ссылку на фото через Telegram API
-            photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-            # формируем формулу IMAGE для Google Sheets
-            photo_cell = f'=IMAGE("{photo_url}")'
-
-        except Exception as e:
-            logging.error(f"Ошибка при получении файла Telegram: {e}")
-            await message.answer("Не удалось обработать фото, попробуйте снова.")
+        file_id = message.photo[-1].file_id
+        # получаем file_path для прямой ссылки
+        file = await bot.get_file(file_id)
+        file_path = file.file_path
+        photo_formula = f'=IMAGE("https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}")'
+        photo_link = f'https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}'
 
     # --- запись в таблицу ---
-    worksheet.append_row([date_str, restaurant, text_review, photo_cell])
+    # столбцы: A=date, B=restaurant, C=text, D=photo (формула IMAGE), E=ссылка для скачивания
+    worksheet.append_row([date_str, restaurant, text_review, photo_formula, photo_link], value_input_option='USER_ENTERED')
 
     # --- ответ пользователю ---
     await message.answer(
