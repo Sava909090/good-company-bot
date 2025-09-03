@@ -34,7 +34,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # список ресторанов
-RESTAURANTS = ["Barbaesco", "Brut is good", "Буфет на большой", "Good company", "United", "Brut lee"]
+RESTAURANTS = ["Ресторан 1", "Ресторан 2", "Ресторан 3", "Ресторан 4", "Ресторан 5", "Ресторан 6"]
 
 # выбранный ресторан по пользователю
 user_restaurant = {}
@@ -70,13 +70,10 @@ async def handle_review(message: types.Message):
     # --- обработка фото ---
     if message.photo:
         try:
-            # Берём file_id последней (самой большой) фотографии
+            # Берём file_id последней фотографии
             file_id = message.photo[-1].file_id
             photo_file_id = file_id
-
-            # Получаем прямую ссылку через API Telegram
-            file_info = await bot.get_file(file_id)
-            photo_link = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
+            photo_link = f"https://t.me/c/{str(message.chat.id)[4:]}/{message.message_id}"
 
         except Exception as e:
             logging.error(f"Ошибка при обработке фото: {e}")
