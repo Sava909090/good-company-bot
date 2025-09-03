@@ -1,1 +1,1 @@
-web: python bot_fixed.py
+worker: python bot_fixed.py
