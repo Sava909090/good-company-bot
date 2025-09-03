@@ -65,7 +65,7 @@ async def handle_review(message: types.Message):
     restaurant = user_restaurant[user_id]
     text_review = message.text if message.text else ""
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    photo_url = ""
+    photo_cell = ""  # сюда будем писать формулу IMAGE
 
     # --- обработка фото ---
     if message.photo:
@@ -76,13 +76,15 @@ async def handle_review(message: types.Message):
 
             # формируем ссылку на фото через Telegram API
             photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+            # формируем формулу IMAGE для Google Sheets
+            photo_cell = f'=IMAGE("{photo_url}")'
 
         except Exception as e:
             logging.error(f"Ошибка при получении файла Telegram: {e}")
             await message.answer("Не удалось обработать фото, попробуйте снова.")
 
     # --- запись в таблицу ---
-    worksheet.append_row([date_str, restaurant, text_review, photo_url])
+    worksheet.append_row([date_str, restaurant, text_review, photo_cell])
 
     # --- ответ пользователю ---
     await message.answer(
