@@ -34,7 +34,14 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # список ресторанов
-RESTAURANTS = ["Barbaresco🇮🇹", "Brut is good🍾", "Буфет на Большой🐈", "United🍺", "Good Company🦊", "Brut Lee🦪"]
+RESTAURANTS = [
+    "Barbaresco🇮🇹",
+    "Brut is good🍾",
+    "Буфет на Большой🐈",
+    "United🍺",
+    "Good Company🦊",
+    "Brut Lee🦪"
+]
 
 # выбранный ресторан по пользователю
 user_restaurant = {}
@@ -62,6 +69,7 @@ async def handle_review(message: types.Message):
         return
 
     restaurant = user_restaurant[user_id]
+    # если фото с подписью → берём caption, иначе обычный текст
     text_review = message.caption if message.caption else (message.text if message.text else "")
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     image_formula = ""
@@ -70,15 +78,13 @@ async def handle_review(message: types.Message):
     # --- обработка фото ---
     if message.photo:
         try:
-            # Берём file_id самой большой (последней) фотографии
             file_id = message.photo[-1].file_id
             file_info = await bot.get_file(file_id)
             file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
 
-            # В столбце D будет картинка через =IMAGE()
+            # Картинка прямо в ячейке
             image_formula = f'=IMAGE("{file_url}")'
-
-            # В столбце E будет ссылка для скачивания
+            # Кнопка "Скачать"
             download_link = f'=HYPERLINK("{file_url}";"Скачать")'
 
         except Exception as e:
@@ -86,7 +92,17 @@ async def handle_review(message: types.Message):
             await message.answer("Не удалось обработать фото, попробуйте снова.")
 
     # --- запись в таблицу ---
-    worksheet.append_row([date_str, restaurant, text_review, image_formula, download_link], value_input_option="USER_ENTERED")
+    try:
+        next_row = len(worksheet.get_all_values()) + 1
+        worksheet.update(
+            f"A{next_row}:E{next_row}",
+            [[date_str, restaurant, text_review, image_formula, download_link]],
+            value_input_option="USER_ENTERED"
+        )
+    except Exception as e:
+        logging.error(f"Ошибка при записи в таблицу: {e}")
+        await message.answer("Не удалось сохранить отзыв, попробуйте снова.")
+        return
 
     # --- ответ пользователю ---
     await message.answer(
