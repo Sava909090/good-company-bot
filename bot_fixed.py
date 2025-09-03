@@ -17,6 +17,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 
+# читаем GOOGLE_CREDENTIALS из переменных окружения
 credentials_json = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_json:
     raise ValueError("Переменная окружения GOOGLE_CREDENTIALS не найдена")
@@ -35,7 +36,6 @@ drive_service = build("drive", "v3", credentials=creds)
 
 # -------------------- TELEGRAM --------------------
 logging.basicConfig(level=logging.INFO)
-
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
@@ -52,7 +52,6 @@ RESTAURANTS = [
 # словарь для хранения выбранного ресторана
 user_restaurant = {}
 
-
 # --- меню старта ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
@@ -61,15 +60,11 @@ async def start_cmd(message: types.Message):
         kb.add(KeyboardButton(r))
     await message.answer("Выберите ресторан:", reply_markup=kb)
 
-
 # --- выбор ресторана ---
 @dp.message_handler(lambda msg: msg.text in RESTAURANTS)
 async def choose_restaurant(message: types.Message):
     user_restaurant[message.from_user.id] = message.text
-    await message.answer(
-        f"Вы выбрали {message.text}. Напишите отзыв и при необходимости прикрепите фото."
-    )
-
+    await message.answer(f"Вы выбрали {message.text}. Напишите отзыв и при необходимости прикрепите фото.")
 
 # --- обработка отзывов ---
 @dp.message_handler(content_types=['text', 'photo'])
@@ -85,6 +80,7 @@ async def handle_review(message: types.Message):
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     photo_url = ""
 
+    # --- если есть фото ---
     if message.photo:
         try:
             file_id = message.photo[-1].file_id
@@ -96,7 +92,12 @@ async def handle_review(message: types.Message):
             with open(photo_name, "wb") as f:
                 f.write(downloaded.read())
 
-            # --- Загружаем в Google Drive ---
+            # Проверка доступа к папке
+            folder_check = drive_service.files().get(fileId=DRIVE_FOLDER_ID, fields="id").execute()
+            if folder_check.get("id") != DRIVE_FOLDER_ID:
+                raise Exception("Нет доступа к папке Google Drive")
+
+            # Загружаем файл
             file_metadata = {"name": photo_name, "parents": [DRIVE_FOLDER_ID]}
             media = MediaFileUpload(photo_name, mimetype="image/jpeg")
             uploaded = drive_service.files().create(
@@ -107,21 +108,20 @@ async def handle_review(message: types.Message):
 
             file_id_drive = uploaded.get("id")
             photo_url = f"https://drive.google.com/file/d/{file_id_drive}/view?usp=sharing"
-
-            os.remove(photo_name)  # удаляем локальный файл
+            os.remove(photo_name)
 
         except Exception as e:
             logging.error(f"Ошибка при загрузке фото: {e}")
             await message.answer("Не удалось загрузить фото. Отзыв будет отправлен без фото.")
 
-    # --- Записываем в Google Sheets ---
+    # --- запись в таблицу ---
     worksheet.append_row([date_str, restaurant, text_review, photo_url])
 
+    # --- ответ пользователю ---
     await message.answer(
         "Спасибо за ваш отзыв! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
     )
-
 
 # -------------------- MAIN --------------------
 if __name__ == "__main__":
