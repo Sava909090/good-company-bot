@@ -5,7 +5,7 @@ from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.utils import executor
+from aiohttp import web
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -16,6 +16,12 @@ from googleapiclient.http import MediaFileUpload
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
+APP_NAME = os.getenv("HEROKU_APP_NAME")  # имя приложения Heroku
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN не найден в переменных окружения")
+if not APP_NAME:
+    raise ValueError("HEROKU_APP_NAME не найден в переменных окружения")
 
 # читаем GOOGLE_CREDENTIALS из переменных окружения
 credentials_json = os.getenv("GOOGLE_CREDENTIALS")
@@ -42,19 +48,18 @@ dp = Dispatcher(bot)
 
 # список ресторанов
 RESTAURANTS = [
-    "Ресторан 1",
-    "Ресторан 2",
-    "Ресторан 3",
-    "Ресторан 4",
-    "Ресторан 5",
-    "Ресторан 6",
+    "Барбареско",
+    "Good Company",
+    "Brut is good",
+    "United",
+    "Буфет на Большой",
+    "Brut Lee",
 ]
 
 # словарь для хранения выбранного ресторана
 user_restaurant = {}
 
 
-# --- меню старта ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -63,14 +68,12 @@ async def start_cmd(message: types.Message):
     await message.answer("Выберите ресторан:", reply_markup=kb)
 
 
-# --- выбор ресторана ---
 @dp.message_handler(lambda msg: msg.text in RESTAURANTS)
 async def choose_restaurant(message: types.Message):
     user_restaurant[message.from_user.id] = message.text
     await message.answer(f"Вы выбрали {message.text}. Напишите отзыв и при необходимости прикрепите фото.")
 
 
-# --- обработка отзывов ---
 @dp.message_handler(content_types=['text', 'photo'])
 async def handle_review(message: types.Message):
     user_id = message.from_user.id
@@ -81,24 +84,19 @@ async def handle_review(message: types.Message):
 
     restaurant = user_restaurant[user_id]
     text_review = message.text if message.text else ""
-
-    # дата
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # если есть фото
     photo_url = ""
     if message.photo:
         file_id = message.photo[-1].file_id
         file = await bot.get_file(file_id)
         file_path = file.file_path
 
-        # скачать фото
         photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
         downloaded = await bot.download_file(file_path)
         with open(photo_name, "wb") as f:
             f.write(downloaded.read())
 
-        # загрузить в Google Drive
         file_metadata = {"name": photo_name, "parents": [DRIVE_FOLDER_ID]}
         media = MediaFileUpload(photo_name, mimetype="image/jpeg")
         uploaded = drive_service.files().create(
@@ -107,18 +105,33 @@ async def handle_review(message: types.Message):
 
         file_id_drive = uploaded.get("id")
         photo_url = f"https://drive.google.com/file/d/{file_id_drive}/view?usp=sharing"
+        os.remove(photo_name)
 
-        os.remove(photo_name)  # удаляем локальный файл
-
-    # пишем в таблицу
     worksheet.append_row([date_str, restaurant, text_review, photo_url])
 
-    # ответ пользователю
     await message.answer(
         "Спасибо за ваш акцент! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
     )
 
 
+# -------------------- WEBHOOK --------------------
+async def on_startup(app):
+    webhook_url = f"https://{APP_NAME}.herokuapp.com/webhook/{BOT_TOKEN}"
+    await bot.set_webhook(webhook_url)
+
+
+async def on_shutdown(app):
+    await bot.delete_webhook()
+
+
+def main():
+    from aiogram.dispatcher.webhook import get_new_configured_app
+    app = get_new_configured_app(dp, path=f"/webhook/{BOT_TOKEN}")
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+    web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    main()
