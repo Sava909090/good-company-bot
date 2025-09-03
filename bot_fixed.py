@@ -17,7 +17,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 
-# читаем GOOGLE_CREDENTIALS из переменных окружения
 credentials_json = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_json:
     raise ValueError("Переменная окружения GOOGLE_CREDENTIALS не найдена")
@@ -49,7 +48,6 @@ RESTAURANTS = [
     "Ресторан 6",
 ]
 
-# словарь для хранения выбранного ресторана
 user_restaurant = {}
 
 # --- меню старта ---
@@ -77,28 +75,26 @@ async def handle_review(message: types.Message):
 
     restaurant = user_restaurant[user_id]
     text_review = message.text if message.text else ""
+
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     photo_url = ""
 
-    # --- если есть фото ---
+    # обработка фото
     if message.photo:
+        file_id = message.photo[-1].file_id
+        file = await bot.get_file(file_id)
+        file_path = file.file_path
+
+        photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+        downloaded = await bot.download_file(file_path)
+        with open(photo_name, "wb") as f:
+            f.write(downloaded.read())
+
         try:
-            file_id = message.photo[-1].file_id
-            file = await bot.get_file(file_id)
-            file_path = file.file_path
-
-            photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
-            downloaded = await bot.download_file(file_path)
-            with open(photo_name, "wb") as f:
-                f.write(downloaded.read())
-
-            # Проверка доступа к папке
-            folder_check = drive_service.files().get(fileId=DRIVE_FOLDER_ID, fields="id").execute()
-            if folder_check.get("id") != DRIVE_FOLDER_ID:
-                raise Exception("Нет доступа к папке Google Drive")
-
-            # Загружаем файл
-            file_metadata = {"name": photo_name, "parents": [DRIVE_FOLDER_ID]}
+            file_metadata = {
+                "name": photo_name,
+                "parents": [DRIVE_FOLDER_ID]  # загружаем в папку
+            }
             media = MediaFileUpload(photo_name, mimetype="image/jpeg")
             uploaded = drive_service.files().create(
                 body=file_metadata,
@@ -108,16 +104,18 @@ async def handle_review(message: types.Message):
 
             file_id_drive = uploaded.get("id")
             photo_url = f"https://drive.google.com/file/d/{file_id_drive}/view?usp=sharing"
-            os.remove(photo_name)
 
         except Exception as e:
-            logging.error(f"Ошибка при загрузке фото: {e}")
-            await message.answer("Не удалось загрузить фото. Отзыв будет отправлен без фото.")
+            logging.error("Ошибка при загрузке фото: %s", e)
+            photo_url = ""
 
-    # --- запись в таблицу ---
+        finally:
+            os.remove(photo_name)
+
+    # добавляем строку в таблицу
     worksheet.append_row([date_str, restaurant, text_review, photo_url])
 
-    # --- ответ пользователю ---
+    # ответ пользователю
     await message.answer(
         "Спасибо за ваш отзыв! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
