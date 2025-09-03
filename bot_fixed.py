@@ -1,6 +1,5 @@
 import logging
 import os
-import json
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
@@ -9,31 +8,26 @@ from aiogram.utils import executor
 
 import gspread
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 
 # -------------------- CONFIG --------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 
 # GOOGLE_CREDENTIALS — JSON сервисного аккаунта
 credentials_json = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_json:
     raise ValueError("Переменная окружения GOOGLE_CREDENTIALS не найдена")
 
+import json
 info = json.loads(credentials_json)
 creds = Credentials.from_service_account_info(info, scopes=[
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/spreadsheets"
 ])
 
-# -------------------- GOOGLE SERVICES --------------------
+# -------------------- GOOGLE SHEETS --------------------
 gc = gspread.authorize(creds)
 sh = gc.open_by_key(SPREADSHEET_ID)
 worksheet = sh.sheet1
-
-drive_service = build("drive", "v3", credentials=creds)
 
 # -------------------- TELEGRAM --------------------
 logging.basicConfig(level=logging.INFO)
@@ -80,32 +74,12 @@ async def handle_review(message: types.Message):
             file = await bot.get_file(file_id)
             file_path = file.file_path
 
-            # скачиваем фото
-            photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
-            downloaded = await bot.download_file(file_path)
-            with open(photo_name, "wb") as f:
-                f.write(downloaded.read())
-
-            # загружаем в папку на Google Drive
-            file_metadata = {
-                "name": photo_name,
-                "parents": [DRIVE_FOLDER_ID]
-            }
-            media = MediaFileUpload(photo_name, mimetype="image/jpeg")
-            uploaded_file = drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields="id"
-            ).execute()
-
-            file_id_drive = uploaded_file.get("id")
-            photo_url = f"https://drive.google.com/uc?id={file_id_drive}"
-
-            os.remove(photo_name)
+            # формируем ссылку на фото через Telegram API
+            photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
 
         except Exception as e:
-            logging.error(f"Ошибка при загрузке фото: {e}")
-            await message.answer("Не удалось загрузить фото, попробуйте снова.")
+            logging.error(f"Ошибка при получении файла Telegram: {e}")
+            await message.answer("Не удалось обработать фото, попробуйте снова.")
 
     # --- запись в таблицу ---
     worksheet.append_row([date_str, restaurant, text_review, photo_url])
