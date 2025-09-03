@@ -17,7 +17,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 
-# читаем GOOGLE_CREDENTIALS из переменных окружения
 credentials_json = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_json:
     raise ValueError("Переменная окружения GOOGLE_CREDENTIALS не найдена")
@@ -28,31 +27,23 @@ creds = Credentials.from_service_account_info(info, scopes=[
     "https://www.googleapis.com/auth/drive"
 ])
 
+# Google Sheets
 gc = gspread.authorize(creds)
 sh = gc.open_by_key(SPREADSHEET_ID)
 worksheet = sh.sheet1
 
+# Google Drive
 drive_service = build("drive", "v3", credentials=creds)
 
 # -------------------- TELEGRAM --------------------
 logging.basicConfig(level=logging.INFO)
-
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # список ресторанов
-RESTAURANTS = [
-    "Ресторан 1",
-    "Ресторан 2",
-    "Ресторан 3",
-    "Ресторан 4",
-    "Ресторан 5",
-    "Ресторан 6",
-]
+RESTAURANTS = ["Ресторан 1", "Ресторан 2", "Ресторан 3", "Ресторан 4", "Ресторан 5", "Ресторан 6"]
 
-# словарь для хранения выбранного ресторана
 user_restaurant = {}
-
 
 # --- меню старта ---
 @dp.message_handler(commands=['start'])
@@ -62,70 +53,66 @@ async def start_cmd(message: types.Message):
         kb.add(KeyboardButton(r))
     await message.answer("Выберите ресторан:", reply_markup=kb)
 
-
 # --- выбор ресторана ---
 @dp.message_handler(lambda msg: msg.text in RESTAURANTS)
 async def choose_restaurant(message: types.Message):
     user_restaurant[message.from_user.id] = message.text
     await message.answer(f"Вы выбрали {message.text}. Напишите отзыв и/или прикрепите фото.")
 
-
 # --- обработка отзывов ---
 @dp.message_handler(content_types=['text', 'photo'])
 async def handle_review(message: types.Message):
     user_id = message.from_user.id
-
     if user_id not in user_restaurant:
         await message.answer("Сначала выберите ресторан через /start")
         return
 
     restaurant = user_restaurant[user_id]
     text_review = message.text if message.text else ""
-
-    # дата
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # если есть фото
     photo_url = ""
+
+    # --- обработка фото ---
     if message.photo:
         try:
             file_id = message.photo[-1].file_id
             file = await bot.get_file(file_id)
             file_path = file.file_path
 
-            # скачать фото
+            # скачиваем файл
             photo_name = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
             downloaded = await bot.download_file(file_path)
             with open(photo_name, "wb") as f:
                 f.write(downloaded.read())
 
-            # загрузить в Google Drive
-            file_metadata = {"name": photo_name, "parents": [DRIVE_FOLDER_ID]}
+            # загружаем на Google Drive
+            file_metadata = {
+                "name": photo_name,
+                "parents": [DRIVE_FOLDER_ID]
+            }
             media = MediaFileUpload(photo_name, mimetype="image/jpeg")
-            uploaded = drive_service.files().create(
+            uploaded_file = drive_service.files().create(
                 body=file_metadata,
                 media_body=media,
                 fields="id"
             ).execute()
 
-            file_id_drive = uploaded.get("id")
-            photo_url = f"https://drive.google.com/file/d/{file_id_drive}/view?usp=sharing"
+            file_id_drive = uploaded_file.get("id")
+            photo_url = f"https://drive.google.com/uc?id={file_id_drive}"
 
-            os.remove(photo_name)  # удаляем локальный файл
+            os.remove(photo_name)
 
         except Exception as e:
             logging.error(f"Ошибка при загрузке фото: {e}")
             await message.answer("Не удалось загрузить фото, попробуйте снова.")
 
-    # пишем в таблицу
+    # --- запись в таблицу ---
     worksheet.append_row([date_str, restaurant, text_review, photo_url])
 
-    # ответ пользователю
     await message.answer(
         "Спасибо за ваш отзыв! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
     )
-
 
 # -------------------- MAIN --------------------
 if __name__ == "__main__":
