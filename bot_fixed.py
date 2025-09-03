@@ -28,20 +28,20 @@ gc = gspread.authorize(creds)
 sh = gc.open_by_key(SPREADSHEET_ID)
 worksheet = sh.sheet1
 
+# -------------------- HELPERS --------------------
+def get_first_empty_row(ws):
+    """Находит первую реально пустую строку (игнорирует форматирование)."""
+    col_a = list(filter(None, ws.col_values(1)))  # только непустые значения в колонке A
+    return len(col_a) + 1
+
 # -------------------- TELEGRAM --------------------
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # список ресторанов
-RESTAURANTS = [
-    "Barbaresco🇮🇹",
-    "Brut is good🍾",
-    "Буфет на Большой🐈",
-    "United🍺",
-    "Good Company🦊",
-    "Brut Lee🦪"
-]
+RESTAURANTS = ["Barbaresco🇮🇹", "Brut is good🍾", "Буфет на Большой🐈", 
+               "United🍺", "Good Company🦊", "Brut Lee🦪"]
 
 # выбранный ресторан по пользователю
 user_restaurant = {}
@@ -69,18 +69,25 @@ async def handle_review(message: types.Message):
         return
 
     restaurant = user_restaurant[user_id]
+
+    # текст — берём caption если есть фото+текст, иначе message.text
     text_review = message.caption if message.caption else (message.text if message.text else "")
+
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     image_formula = ""
     download_link = ""
 
+    # --- обработка фото ---
     if message.photo:
         try:
             file_id = message.photo[-1].file_id
             file_info = await bot.get_file(file_id)
             file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
 
+            # В столбце D будет картинка через =IMAGE()
             image_formula = f'=IMAGE("{file_url}")'
+
+            # В столбце E будет ссылка для скачивания
             download_link = f'=HYPERLINK("{file_url}";"Скачать")'
 
         except Exception as e:
@@ -89,20 +96,16 @@ async def handle_review(message: types.Message):
 
     # --- запись в таблицу ---
     try:
-        # считаем только заполненные строки в колонке A
-        next_row = len(worksheet.col_values(1)) + 1
-
-        worksheet.update(
-            f"A{next_row}:E{next_row}",
-            [[date_str, restaurant, text_review, image_formula, download_link]],
-            value_input_option="USER_ENTERED"
-        )
-
+        next_row = get_first_empty_row(worksheet)
+        worksheet.update(f"A{next_row}:E{next_row}", 
+                         [[date_str, restaurant, text_review, image_formula, download_link]], 
+                         value_input_option="USER_ENTERED")
     except Exception as e:
-        logging.error(f"Ошибка при записи в таблицу: {e}")
-        await message.answer("Не удалось сохранить отзыв, попробуйте снова.")
+        logging.error(f"Ошибка записи в таблицу: {e}")
+        await message.answer("Не удалось записать отзыв в таблицу, попробуйте снова.")
         return
 
+    # --- ответ пользователю ---
     await message.answer(
         "Спасибо за ваш отзыв! Команда уже начала работу над улучшением!\n"
         "Чтобы оставить ещё один отзыв, нажмите /start"
